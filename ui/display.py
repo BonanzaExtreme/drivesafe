@@ -8,6 +8,8 @@ Single file that handles everything displayed on screen:  - Startup screen with 
   - Info panel toggle (press I) showing shortcuts + system info
 """
 
+import datetime
+
 import cv2
 import numpy as np
 
@@ -157,7 +159,7 @@ def _draw_alert_banner(frame, text: str, color, bar_top: int, sf: float) -> None
 
 # ── Main HUD ─────────────────────────────────────────────────────
 
-def draw_hud(frame, detections, assessor, estimator, fps, ms_id,
+def draw_hud(frame, detections, assessor, estimator,
              path_zone: float = 0.40,
              alert_text: str | None = None,
              alert_color=None):
@@ -218,29 +220,21 @@ def draw_hud(frame, detections, assessor, estimator, fps, ms_id,
         _draw_alert_banner(frame, alert_text,
                            alert_color or (0, 200, 255), bar_top, sf)
 
-    # ── Top status bar ────────────────────────────────────────────
+    # ── Top status bar (clock + detection counts) ──────────────────
     draw_panel(frame, 0, 0, w, bar_top)
     ty  = int(bar_top * 0.76)
     pad = int(12 * sf)
-    put_text(frame, f"FPS {fps:.0f}  ({ms_id:.1f} ms)", 
-         (pad, ty), scale=ts, color=GRAY, thickness=2)
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d   %H:%M:%S")
+    put_text(frame, now_str, (pad, ty), scale=ts, color=GRAY, thickness=2)
 
     n_ped = sum(1 for d in detections if d.cls_name == "pedestrian")
     n_cw  = sum(1 for d in detections if d.cls_name == "crosswalk")
-    path_str   = f"  PATH {n_in_path}" if n_in_path else ""
-    counts     = f"PED {n_ped}   CW {n_cw}{path_str}"
-    counts_col = (0, 80, 230) if n_in_path else GRAY   # red tint when peds in path
+    counts     = f"PED {n_ped}   CW {n_cw}"
+    counts_col = (0, 80, 230) if n_in_path else GRAY
     (cw_px, _), _ = cv2.getTextSize(counts, FONT, ts, 2)
     put_text(frame, counts, (w - cw_px - pad, ty), scale=ts,
              color=counts_col, thickness=2)
-
-    # ── Bottom safety bar ─────────────────────────────────────────
-    bar_bot = max(int(10 * sf), 6)
-    cv2.rectangle(frame, (0, h - bar_bot), (w, h), level_color, cv2.FILLED)
-    ls = 0.85 * sf
-    (lw_px, _), _ = cv2.getTextSize(level_label, FONT, ls, 2)
-    put_text(frame, level_label, (w - lw_px - pad, h - bar_bot - int(8 * sf)),
-             scale=ls, color=level_color, thickness=max(2, int(3 * sf)))
 
     return overall
 

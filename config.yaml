@@ -1,0 +1,38 @@
+# DriveSafe Configuration
+
+camera:
+  source: 0
+  use_gstreamer: false
+  width: 1280               # force 1280x720 capture 
+  height: 720
+  framerate: 30
+
+model:
+  weights: "best.engine"  # TensorRT FP16 engine – 10-20x faster than CPU
+  confidence: 0.6
+  iou: 0.7
+  imgsz: 640
+  device: "0"              # Jetson Orin GPU
+  half: False              # TRT engine already compiled as FP16; leave false
+
+distance:
+  focal_length: 615.0       # camera focal length in pixels (calibrate per CALIBRATION.md)
+  person_height: 1.7        # average adult height in metres
+  crosswalk_a: -0.015       # crosswalk linear coefficient (slope)
+  crosswalk_b: 15.0         # crosswalk linear coefficient (intercept)
+
+safety:
+  pedestrian:
+    danger: 2.5             # metres – red zone
+    warning: 5.0            # metres – amber zone
+  crosswalk:
+    danger: 5.0
+    warning: 8.0
+
+alerts:
+  enabled: true
+  voice_rate: 160           # espeak words per minute (120-200)
+  path_zone: 0.40           # centre fraction of frame treated as car's travel path
+  danger_cooldown: 2.5      # seconds between repeated danger alerts
+  warning_cooldown: 5.0     # seconds between repeated warning alerts
+  crosswalk_cooldown: 7.0   # seconds between repeated crosswalk alerts

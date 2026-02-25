@@ -1,0 +1,1 @@
+"""DriveSafe - core package (detector, distance, safety)."""

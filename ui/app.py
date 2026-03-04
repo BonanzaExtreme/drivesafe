@@ -67,6 +67,7 @@ class ProcessingThread(QThread):
     frame_ready       = pyqtSignal(QImage)
     status_ready      = pyqtSignal(dict)
     recording_changed = pyqtSignal(bool)   # True = started, False = stopped
+    ready             = pyqtSignal() 
 
     def __init__(self, cfg: dict, parent=None) -> None:
         super().__init__(parent)
@@ -127,6 +128,7 @@ class ProcessingThread(QThread):
             device     = str(cfg["model"].get("device", "0")),
             half       = cfg["model"].get("half", True),
         )
+        self.ready.emit()   
         estimator = DistanceEstimator(
             focal_length  = cfg["distance"]["focal_length"],
             person_height = cfg["distance"]["person_height"],
@@ -344,7 +346,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._video)
 
         # ── Toolbar ───────────────────────────────────────────────────────────
-        toolbar = self.addToolBar("Controls")
+        self._toolbar = self.addToolBar("Controls")
+        toolbar = self._toolbar
         toolbar.setMovable(False)
         toolbar.setStyleSheet(_TOOLBAR_STYLE)
 
@@ -407,6 +410,8 @@ class MainWindow(QMainWindow):
         self._thread.status_ready.connect(self._on_status)
         self._thread.recording_changed.connect(self._on_recording_changed)
         self._thread.start()
+
+        self.showFullScreen()
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -471,7 +476,14 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
-        if key == Qt.Key_Q or key == Qt.Key_Escape:
+        if key == Qt.Key_F11:
+            self._toggle_fullscreen()
+        elif key == Qt.Key_Escape:
+            if self.isFullScreen():
+                self._toggle_fullscreen()
+            else:
+                self.close()
+        elif key == Qt.Key_Q:
             self.close()
         elif key == Qt.Key_R:
             self._rec_action.setChecked(not self._rec_action.isChecked())
@@ -481,7 +493,20 @@ class MainWindow(QMainWindow):
         elif key == Qt.Key_I:
             self._info_action.setChecked(not self._info_action.isChecked())
             self._on_info()
+        
+    def _toggle_fullscreen(self) -> None:
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
 
+    def changeEvent(self, event) -> None:
+            super().changeEvent(event)
+            from PyQt5.QtCore import QEvent
+            if event.type() == QEvent.WindowStateChange:
+                is_fs = self.isFullScreen()
+                self._toolbar.setVisible(not is_fs)
+                self._status_bar.setVisible(not is_fs)
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event) -> None:

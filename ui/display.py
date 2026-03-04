@@ -206,10 +206,23 @@ def draw_hud(frame, detections, assessor, estimator,
         if det.track_id >= 0:
             tag += f" #{det.track_id}"
         tag += f"  {dist:.1f}m"
-        if in_path:
-            tag += "  !"
+       
         put_text(frame, tag, (x1, max(y1 - int(10 * sf), bar_top + 5)),
                  scale=ts, color=WHITE, thickness=2, bg=color)
+        if in_path:
+            badge      = "IN PATH"
+            b_scale    = 0.55 * sf
+            b_thick    = max(1, int(2 * sf))
+            (bw, bh), _ = cv2.getTextSize(badge, FONT, b_scale, b_thick)
+            bx = x1 + max(int(6 * sf), 4)
+            by = y2 - max(int(8 * sf), 6)
+            pad_b = int(4 * sf)
+            cv2.rectangle(frame,
+                          (bx - pad_b, by - bh - pad_b),
+                          (bx + bw + pad_b, by + pad_b),
+                          color, cv2.FILLED)
+            cv2.putText(frame, badge, (bx, by),
+                        FONT, b_scale, WHITE, b_thick, cv2.LINE_AA)
 
     overall     = assessor.worst(levels)
     level_color = assessor.color(overall)
@@ -236,6 +249,15 @@ def draw_hud(frame, detections, assessor, estimator,
     put_text(frame, counts, (w - cw_px - pad, ty), scale=ts,
              color=counts_col, thickness=2)
 
+    if n_in_path:
+        ip_text = f"IN PATH: {n_in_path}"
+        ip_col  = (0, 30, 200)
+        (ip_w, _), _ = cv2.getTextSize(ip_text, FONT, ts, 2)
+        # Position it to the left of the PED/CW count
+        ip_x = w - cw_px - pad - ip_w - int(24 * sf)
+        put_text(frame, ip_text, (ip_x, ty),
+                 scale=ts, color=WHITE, thickness=2, bg=ip_col)
+        
     return overall
 
 

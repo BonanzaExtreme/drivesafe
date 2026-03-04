@@ -16,8 +16,8 @@ model:
   half: False              # TRT engine already compiled as FP16; leave false
 
 distance:
-  focal_length: 615.0       # camera focal length in pixels (calibrate per CALIBRATION.md)
-  person_height: 1.7        # average adult height in metres
+  focal_length: 610.0       # camera focal length in pixels (calibrate per CALIBRATION.md)
+  person_height: 1.62        # average adult height in metres
   crosswalk_a: -0.015       # crosswalk linear coefficient (slope)
   crosswalk_b: 15.0         # crosswalk linear coefficient (intercept)
 

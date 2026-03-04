@@ -10,11 +10,17 @@ Usage:
     mgr.fire("ped_warning", "Slow down, pedestrian ahead", level="warning")
     mgr.fire("crosswalk",   "Crosswalk ahead, be careful", level="crosswalk")
 """
-
+import os
 import subprocess
 import threading
 import time
 
+# Paths resolved relative to this file so they work from any working directory
+_HERE        = os.path.dirname(os.path.abspath(__file__))
+_PIPER_BIN   = os.path.join(_HERE, "..", "piper", "piper")
+_VOICE_MODEL = os.path.join(_HERE, "..", "voice",
+                            "en_GB-northern_english_male-medium.onnx")
+_SAMPLE_RATE = "22050"
 
 class AlertManager:
     """
@@ -79,11 +85,22 @@ class AlertManager:
 
     def _speak(self, message: str) -> None:
         try:
-            subprocess.run(
-                ["espeak", "-s", str(self.voice_rate), "-v", "en", message],
-                capture_output=True,
-                timeout=6,
+            piper = subprocess.Popen(
+                [_PIPER_BIN, "--model", _VOICE_MODEL, "--output_raw"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
+            # aplay plays the raw PCM audio
+            aplay = subprocess.Popen(
+                ["aplay", "-r", _SAMPLE_RATE, "-f", "S16_LE", "-t", "raw", "-"],
+                stdin=piper.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            piper.stdin.write(message.encode())
+            piper.stdin.close()
+    
         except FileNotFoundError:
             pass  # espeak not installed – silent degradation
         except Exception:

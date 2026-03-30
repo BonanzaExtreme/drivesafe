@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (
 
 # Folder where recordings are saved (project root / recordings)
 RECORDINGS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "recordings"
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "recordings"
 )
 
 _VIDEO_EXTS = {".avi", ".mp4", ".mkv", ".mov"}

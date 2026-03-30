@@ -29,16 +29,16 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from core.alerts import AlertManager
-from core.braking import BrakingModel
-from core.clip import ClipRecorder
-from core.capture import VideoCaptureAsync, open_camera
-from core.detector import Detector
-from core.distance import DistanceEstimator
-from core.gps import GPSReader
-from core.safety import COLORS, SafetyAssessor, SafetyLevel, is_in_path
-from ui.archive import RECORDINGS_DIR, ArchiveWindow
-from ui.display import draw_hud, draw_info_panel
+from ..core.alerts import AlertManager
+from ..core.braking import BrakingModel
+from ..core.clip import ClipRecorder
+from ..core.capture import VideoCaptureAsync, open_camera
+from ..core.detector import Detector
+from ..core.distance import DistanceEstimator
+from ..core.gps import GPSReader
+from ..core.safety import COLORS, SafetyAssessor, SafetyLevel, is_in_path
+from .archive import RECORDINGS_DIR, ArchiveWindow
+from .display import draw_hud, draw_info_panel
 
 
 # ── Safety-level colours re-expressed as hex for Qt ──────────────────────────

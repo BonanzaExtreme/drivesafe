@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 
-from core.safety import SafetyLevel, is_in_path
+from ..core.safety import SafetyLevel, is_in_path
 
 # Fonts (OpenCV built-ins only – no BOLD or ITALIC, they don't exist)
 FONT = cv2.FONT_HERSHEY_SIMPLEX

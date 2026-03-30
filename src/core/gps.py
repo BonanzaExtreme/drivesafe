@@ -29,7 +29,7 @@ import threading
 import time
 import logging
 
-from core.braking import BrakingModel
+from .braking import BrakingModel
 
 logger = logging.getLogger(__name__)
 

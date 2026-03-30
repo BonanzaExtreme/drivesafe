@@ -18,12 +18,12 @@ import time
 # Paths resolved relative to this file so they work from any working directory
 _HERE        = os.path.dirname(os.path.abspath(__file__))
 _BEEP_SOUNDS: dict[str, str] = {
-    "danger": os.path.join(_HERE, "..", "soundeffects", "mixkit-vintage-warning-alarm-990.wav"),
-    "warning": os.path.join(_HERE, "..", "soundeffects", "mixkit-classic-short-alarm-993.wav"),
+    "danger": os.path.join(_HERE, "../../assets/soundeffects", "mixkit-vintage-warning-alarm-990.wav"),
+    "warning": os.path.join(_HERE, "../../assets/soundeffects", "mixkit-classic-short-alarm-993.wav"),
 }
 _DEFAULT_BEEP = _BEEP_SOUNDS["warning"]
-_PIPER_BIN   = os.path.join(_HERE, "..", "piper", "piper")
-_VOICE_MODEL = os.path.join(_HERE, "..", "voice",
+_PIPER_BIN   = os.path.join(_HERE, "../../tools/piper", "piper")
+_VOICE_MODEL = os.path.join(_HERE, "../../models/voice",
                             "en_US-hfc_male-medium.onnx")
 _SAMPLE_RATE = "22050"
 

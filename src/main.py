@@ -15,8 +15,8 @@ from PyQt5.QtCore import Qt, QThread
 from PyQt5.QtGui import QColor, QPalette, QPixmap, QPainter, QFont, QPen, QLinearGradient, QPainterPath
 from PyQt5.QtWidgets import QApplication, QSplashScreen
 
-from src.core.config import load_config
-from src.ui.app import MainWindow
+from core.config import load_config
+from ui.app import MainWindow
 
 
 def _apply_dark_palette(app: QApplication) -> None:

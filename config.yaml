@@ -8,7 +8,7 @@ camera:
   framerate: 30
 
 model:
-  weights: "best.engine"  # TensorRT FP16 engine – 10-20x faster than CPU
+  weights: "models/yolo/best.engine"  # TensorRT FP16 engine – 10-20x faster than CPU
   confidence: 0.6
   iou: 0.7
   imgsz: 640

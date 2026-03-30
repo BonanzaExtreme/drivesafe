@@ -32,7 +32,14 @@ safety:
 alerts:
   enabled: true
   voice_rate: 160           # espeak words per minute (120-200)
-  path_zone: 0.40           # centre fraction of frame treated as car's travel path
+  path_zone: 0.70           # centre fraction of frame treated as car's travel path
   danger_cooldown: 2.5      # seconds between repeated danger alerts
   warning_cooldown: 5.0     # seconds between repeated warning alerts
   crosswalk_cooldown: 7.0   # seconds between repeated crosswalk alerts
+
+clips:
+  enabled: true
+  pre_seconds: 3.0          # seconds of footage kept before the event
+  post_seconds: 3.0         # seconds of footage kept after the event
+  cooldown: 10.0            # minimum seconds between separate clips
+  trigger_level: "warning"  # "warning" clips both warning+danger; "danger" for danger only

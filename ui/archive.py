@@ -58,12 +58,28 @@ def _fmt_duration(path: str) -> str:
 
 # ── Stylesheet ─────────────────────────────────────────────────────────────────
 
+_FILTERS = [
+    ("All",             None,             "#2e2e2e"),
+    ("Recordings",      "Recording",      "#1a5c1a"),
+    ("Clips (Warning)", "Clip (Warning)", "#7a5800"),
+    ("Clips (Danger)",  "Clip (Danger)",  "#6b1a1a"),
+]
 _STYLE = """
 QDialog {
     background: #1a1a1a;
 }
 QLabel {
     color: #cccccc;
+}
+QPushButton#filter_btn {
+    padding: 5px 14px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+    border: 1px solid #444;
+}
+QPushButton#filter_btn:checked {
+    border: 1px solid #aaa;
 }
 QTableWidget {
     background: #121212;
@@ -107,13 +123,15 @@ QScrollBar::handle:vertical { background: #3e3e3e; border-radius: 4px; }
 # ── Archive window ─────────────────────────────────────────────────────────────
 
 class ArchiveWindow(QDialog):
-    """Modal dialog listing all saved recordings."""
+    """Modal dialog listing all saved recordings and clips, filterable by category."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("DriveSafe – Archive")
-        self.setMinimumSize(740, 480)
+        self.setMinimumSize(800, 520)
         self.setStyleSheet(_STYLE)
+        self._active_filter: str | None = None   # None = show all
+        self._filter_btns: list = []
         self._build_ui()
         self._load()
 
@@ -121,23 +139,42 @@ class ArchiveWindow(QDialog):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setSpacing(12)
+        root.setSpacing(10)
         root.setContentsMargins(16, 16, 16, 16)
 
-        header = QLabel("Recorded Videos")
+        title_row = QHBoxLayout()
+        header = QLabel("Archive")
         header.setStyleSheet(
-            "font-size: 17px; font-weight: bold; color: #ffffff; margin-bottom: 2px;"
+            "font-size: 17px; font-weight: bold; color: #ffffff;"
         )
-        root.addWidget(header)
+        title_row.addWidget(header)
+        root.addLayout(title_row)
+
+        for label, filter_val, bg_color in _FILTERS:
+            btn = QPushButton(label)
+            btn.setObjectName("filter_btn")
+            btn.setCheckable(True)
+            btn.setChecked(filter_val is None)   # "All" starts checked
+            btn.setStyleSheet(
+                f"QPushButton#filter_btn {{ background: {bg_color}; color: #dddddd; }}"
+                f"QPushButton#filter_btn:checked {{ background: {bg_color}; color: #ffffff; border: 1.5px solid #ffffff; }}"
+            )
+            # Capture filter_val in closure
+            btn.clicked.connect(lambda checked, fv=filter_val, b=btn: self._on_filter(fv, b))
+            title_row.addWidget(btn)
+            self._filter_btns.append((btn, filter_val))
+
+        root.addLayout(title_row)
 
         # Table
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["Filename", "Date", "Duration", "Size"])
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["Filename", "Type", "Date", "Duration", "Size"])
         hdr = self._table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setShowGrid(True)
@@ -171,8 +208,30 @@ class ArchiveWindow(QDialog):
         btn_row.addWidget(close_btn)
 
         root.addLayout(btn_row)
+    
+    # ── Filter ────────────────────────────────────────────────────────────────
+
+    def _on_filter(self, filter_val: str | None, clicked_btn) -> None:
+        """Switch active category filter and reload the table."""
+        self._active_filter = filter_val
+        # Update checked state of all filter buttons
+        for btn, fv in self._filter_btns:
+            btn.blockSignals(True)
+            btn.setChecked(fv == filter_val)
+            btn.blockSignals(False)
+        self._load()
 
     # ── Data ─────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _classify(name: str) -> str:
+        """Return the display type string for a filename."""
+        if name.startswith("clip_danger"):
+            return "Clip (Danger)"
+        if name.startswith("clip_warning"):
+            return "Clip (Warning)"
+        if name.startswith("clip_"):
+            return "Clip"
+        return "Recording"
 
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
@@ -186,17 +245,28 @@ class ArchiveWindow(QDialog):
         for name in os.listdir(RECORDINGS_DIR):
             if os.path.splitext(name)[1].lower() not in _VIDEO_EXTS:
                 continue
+            vid_type = self._classify(name)
+            # Apply category filter
+            if self._active_filter is not None and vid_type != self._active_filter:
+                continue
             path = os.path.join(RECORDINGS_DIR, name)
-            entries.append((name, path, os.stat(path)))
+            entries.append((name, path, os.stat(path), vid_type))
 
         if not entries:
-            self._show_empty("No recordings yet.")
+            label = f"No {self._active_filter or 'recordings'} found."
+            self._show_empty(label)
             return
 
         # Newest first
         entries.sort(key=lambda e: e[2].st_mtime, reverse=True)
+        _ROW_COLOR = {
+            "Recording":      "#1a2a1a",
+            "Clip (Warning)": "#2a2000",
+            "Clip (Danger)":  "#2a0a0a",
+            "Clip":           "#1e1e2a",
+        }
 
-        for name, path, stat in entries:
+        for name, path, stat, vid_type in entries:
             row = self._table.rowCount()
             self._table.insertRow(row)
 
@@ -206,11 +276,18 @@ class ArchiveWindow(QDialog):
             name_item = QTableWidgetItem(name)
             name_item.setData(Qt.UserRole, path)
 
-            self._table.setItem(row, 0, name_item)
-            self._table.setItem(row, 1, QTableWidgetItem(dt))
-            self._table.setItem(row, 2, QTableWidgetItem(_fmt_duration(path)))
-            self._table.setItem(row, 3, QTableWidgetItem(_fmt_size(stat.st_size)))
-
+            items = [
+                name_item,
+                QTableWidgetItem(vid_type),
+                QTableWidgetItem(dt),
+                QTableWidgetItem(_fmt_duration(path)),
+                QTableWidgetItem(_fmt_size(stat.st_size)),
+            ]
+            row_bg = _ROW_COLOR.get(vid_type, "#1a1a1a")
+            from PyQt5.QtGui import QColor
+            for col, item in enumerate(items):
+                item.setBackground(QColor(row_bg))
+                self._table.setItem(row, col, item)
         self._table.setSortingEnabled(True)
 
     def _show_empty(self, msg: str) -> None:

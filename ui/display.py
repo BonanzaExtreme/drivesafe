@@ -110,7 +110,7 @@ def draw_startup_screen(frame):
                      scale=0.62 * sf, thickness=2, color=GRAY)
 
     # Developers
-    _center_text(frame, "Developed by: Your Team Name",
+    _center_text(frame, "Developed by: TIPQC DriveSafe",
                  h - int(80 * sf), scale=0.6 * sf, thickness=2, color=(130, 130, 130))
 
     # Instructions
@@ -162,13 +162,15 @@ def _draw_alert_banner(frame, text: str, color, bar_top: int, sf: float) -> None
 def draw_hud(frame, detections, assessor, estimator,
              path_zone: float = 0.40,
              alert_text: str | None = None,
-             alert_color=None):
+             alert_color=None,
+             speed_kmh: float | None = None):
     """
     Draw the complete heads-up display on the video frame.
 
     path_zone   – fraction of frame width treated as the car's travel path.
     alert_text  – when set, shows a bold warning banner below the top bar.
     alert_color – BGR colour for the banner (defaults to WARNING amber).
+    speed_kmh   – current GPS ground speed in km/h, or None when unavailable.
 
     Returns the overall SafetyLevel for this frame.
     """
@@ -240,6 +242,21 @@ def draw_hud(frame, detections, assessor, estimator,
 
     now_str = datetime.datetime.now().strftime("%Y-%m-%d   %H:%M:%S")
     put_text(frame, now_str, (pad, ty), scale=ts, color=GRAY, thickness=2)
+
+    # ── Speed readout (GPS) – centred in the top bar ──────────────
+    if speed_kmh is not None:
+        spd_text = f"{speed_kmh:.0f} km/h"
+        spd_col  = (100, 220, 100)   # muted green when normal
+        if speed_kmh > 50:
+            spd_col = (0, 200, 255)  # amber above 50 km/h
+        if speed_kmh > 100:
+            spd_col = (0, 80, 230)   # red above 100 km/h
+    else:
+        spd_text = "-- km/h"
+        spd_col  = (100, 100, 100)
+    (spd_w, _), _ = cv2.getTextSize(spd_text, FONT, ts, 2)
+    spd_x = (w - spd_w) // 2
+    put_text(frame, spd_text, (spd_x, ty), scale=ts, color=spd_col, thickness=2)
 
     n_ped = sum(1 for d in detections if d.cls_name == "pedestrian")
     n_cw  = sum(1 for d in detections if d.cls_name == "crosswalk")
@@ -340,5 +357,5 @@ def draw_info_panel(frame, cfg, fps):
         y_offset += row
 
     # Footer
-    put_text(frame, "Developed by: Your Team Name",
+    put_text(frame, "Developed by: TIPQC DriveSafe",
              (x0 + pad, y0 + ph - int(14 * sf)), scale=ts, color=(120, 120, 120), thickness=2)

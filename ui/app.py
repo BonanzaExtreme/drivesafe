@@ -30,9 +30,12 @@ from PyQt5.QtWidgets import (
 )
 
 from core.alerts import AlertManager
+from core.braking import BrakingModel
+from core.clip import ClipRecorder
 from core.capture import VideoCaptureAsync, open_camera
 from core.detector import Detector
 from core.distance import DistanceEstimator
+from core.gps import GPSReader
 from core.safety import COLORS, SafetyAssessor, SafetyLevel, is_in_path
 from ui.archive import RECORDINGS_DIR, ArchiveWindow
 from ui.display import draw_hud, draw_info_panel
@@ -83,6 +86,7 @@ class ProcessingThread(QThread):
         self._pending_rec_path    = None   # path queued before first frame
         self._write_queue         = queue.Queue()
         self._write_thread        = None
+        self._gps                 = GPSReader()
     
     def _writer_worker(self) -> None:
         while True:
@@ -109,6 +113,7 @@ class ProcessingThread(QThread):
 
     def stop(self) -> None:
         self._running = False
+        self._gps.stop()
         self.wait()
 
     # ── Thread body ───────────────────────────────────────────────────────────
@@ -118,6 +123,9 @@ class ProcessingThread(QThread):
 
         # Initialise camera
         cap = VideoCaptureAsync(open_camera(cfg)).start()
+
+        # Start GPS reader (daemon thread – safe to start before model loads)
+        self._gps.start()
 
         # Initialise pipeline modules
         detector = Detector(
@@ -143,6 +151,12 @@ class ProcessingThread(QThread):
         })
 
         alert_cfg = cfg.get("alerts", {})
+        braking_cfg = cfg.get("braking", {})
+        braking_model = BrakingModel(
+            reaction_time_s=braking_cfg.get("reaction_time_s", 1.5),
+            safety_margin=braking_cfg.get("safety_margin", 1.20),
+            mu=braking_cfg.get("dry_asphalt_mu", 0.75),
+        )
         alert_mgr = AlertManager(
             enabled    = alert_cfg.get("enabled", True),
             voice_rate = alert_cfg.get("voice_rate", 160),
@@ -152,7 +166,21 @@ class ProcessingThread(QThread):
                 "crosswalk": alert_cfg.get("crosswalk_cooldown", 7.0),
             },
         )
-        path_zone = alert_cfg.get("path_zone", 0.40)
+        path_zone = alert_cfg.get("path_zone", 0.70)
+
+        # ── Clip recorder (automatic danger clips) ────────────────────────
+        clip_cfg     = cfg.get("clips", {})
+        clip_enabled = clip_cfg.get("enabled", True)
+        clip_trigger = (SafetyLevel.DANGER
+                        if clip_cfg.get("trigger_level", "danger") == "danger"
+                        else SafetyLevel.WARNING)
+        clip_recorder = ClipRecorder(
+            output_dir  = RECORDINGS_DIR,
+            fps         = 20.0,
+            pre_seconds  = clip_cfg.get("pre_seconds", 3.0),
+            post_seconds = clip_cfg.get("post_seconds", 3.0),
+            cooldown     = clip_cfg.get("cooldown", 10.0),
+        )
 
         fps       = 0.0
         prev_time = time.perf_counter()
@@ -212,6 +240,9 @@ class ProcessingThread(QThread):
             prev_time = now
 
             detections = detector.track(frame)
+            speed_kmh = self._gps.speed_kmh
+            is_stationary = speed_kmh is not None and speed_kmh <= 0.5
+            is_moving = speed_kmh is not None and speed_kmh > 0.5
 
             # ── Determine alerts ──────────────────────────────────────────────
             _, frame_w     = frame.shape[:2]
@@ -223,6 +254,18 @@ class ProcessingThread(QThread):
                 level = assessor.assess(det.cls_name, dist)
                 if det.cls_name == "pedestrian":
                     if is_in_path(det.bbox, frame_w, path_zone):
+                        if is_moving:
+                            stop_dist_m = self._gps.stopping_distance_m(model=braking_model)
+                            if stop_dist_m is not None and stop_dist_m > 0.0:
+                                ratio = dist / stop_dist_m
+                                if ratio <= 1.0:
+                                    level = SafetyLevel.DANGER
+                                elif ratio <= 1.5:
+                                    level = SafetyLevel.WARNING
+                                else:
+                                    level = SafetyLevel.SAFE
+                        elif is_stationary:
+                            level = assessor.assess(det.cls_name, dist)
                         in_path_levels.append(level)
                 elif det.cls_name == "crosswalk":
                     cw_worst = SafetyLevel(max(int(cw_worst or 0), int(level)))
@@ -234,17 +277,21 @@ class ProcessingThread(QThread):
                 worst = SafetyLevel(max(in_path_levels))
                 count = len(in_path_levels)
                 if worst == SafetyLevel.DANGER:
-                    voice = "Brake now!" if count == 1 else "Multiple pedestrians! Brake now!"
-                    alert_mgr.fire("ped_danger", voice, level="danger")
+                    if not is_stationary:
+                        voice = "BRAKE NOW!" if count == 1 else "Multiple pedestrians! BRAKE NOW!"
+                        alert_mgr.fire("ped_danger", voice, level="danger")
                     alert_text  = "BRAKE NOW" if count == 1 else f"BRAKE NOW  ({count} IN PATH)"
                     alert_color = COLORS[SafetyLevel.DANGER]
                 elif worst == SafetyLevel.WARNING:
-                    alert_mgr.fire("ped_warning", "Slow down, pedestrian ahead", level="warning")
+                    if not is_stationary:
+                        voice = "SLOW DOWN!" if count == 1 else f"{count} pedestrians ahead, SLOW DOWN!"
+                        alert_mgr.fire("ped_warning", voice, level="warning")
                     alert_text  = "SLOW DOWN"
                     alert_color = COLORS[SafetyLevel.WARNING]
 
             if cw_worst is not None and cw_worst >= SafetyLevel.WARNING:
-                alert_mgr.fire("crosswalk", "Crosswalk ahead, be careful", level="crosswalk")
+                if not is_stationary:
+                    alert_mgr.fire("crosswalk", "Crosswalk ahead, be careful", level="crosswalk")
                 if alert_text is None:
                     alert_text  = "CROSSWALK AHEAD  —  BE CAREFUL"
                     alert_color = COLORS[SafetyLevel.WARNING]
@@ -257,6 +304,7 @@ class ProcessingThread(QThread):
                 path_zone=path_zone,
                 alert_text=alert_text,
                 alert_color=alert_color,
+                speed_kmh=speed_kmh,
             )
 
             if self.show_info:
@@ -265,6 +313,10 @@ class ProcessingThread(QThread):
             # ── Write frame to recording ──────────────────────────────────────
             if self._writer is not None:
                 self._write_queue.put(frame.copy())
+            # ── Clip recorder: feed every frame, trigger on danger ────────────
+            clip_recorder.feed(frame)
+            if clip_enabled and overall >= clip_trigger:
+                clip_recorder.trigger(SafetyAssessor.label(overall).lower())
 
             # ── Emit status dict ──────────────────────────────────────────────
             self.status_ready.emit({
@@ -284,6 +336,8 @@ class ProcessingThread(QThread):
             self.frame_ready.emit(qimg.copy())
 
         # Release resources
+        clip_recorder.release()
+
         if self._writer is not None:
             self._write_queue.put(None)
             if self._write_thread is not None:
@@ -308,7 +362,7 @@ QToolBar {
 }
 QToolButton {
     color: #cccccc;
-    font-size: 13px;
+    font-size: 15px;
     padding: 4px 14px;
     border-radius: 4px;
     background: transparent;
@@ -361,7 +415,7 @@ class MainWindow(QMainWindow):
             "QMenu::item { padding: 6px 24px; }"
             "QMenu::item:selected { background: #3c64b4; }"
         )
-        archive_action = QAction("📁   Archive", self)
+        archive_action = QAction("💾   Archive", self)
         archive_action.triggered.connect(self._on_archive)
         burger_menu.addAction(archive_action)
         burger_btn.setMenu(burger_menu)
@@ -374,7 +428,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(spacer)
 
         # ── Record button ─────────────────────────────────────────────────────
-        self._rec_action = QAction("⏺   Record", self, checkable=True)
+        self._rec_action = QAction("🔴  Record", self, checkable=True)
         self._rec_action.setToolTip("Start / stop recording  (R)")
         self._rec_action.triggered.connect(self._on_record)
         toolbar.addAction(self._rec_action)
@@ -383,12 +437,12 @@ class MainWindow(QMainWindow):
         if rec_widget:
             rec_widget.setObjectName("rec_btn")
 
-        self._mute_action = QAction("Mute Alerts", self, checkable=True)
+        self._mute_action = QAction("🔇  Mute Alerts", self, checkable=True)
         self._mute_action.setToolTip("Toggle voice alerts  (M)")
         self._mute_action.triggered.connect(self._on_mute)
         toolbar.addAction(self._mute_action)
 
-        self._info_action = QAction("Info Panel", self, checkable=True)
+        self._info_action = QAction("ℹ️  Info Panel", self, checkable=True)
         self._info_action.setToolTip("Toggle info overlay  (I)")
         self._info_action.triggered.connect(self._on_info)
         toolbar.addAction(self._info_action)
@@ -504,9 +558,7 @@ class MainWindow(QMainWindow):
             super().changeEvent(event)
             from PyQt5.QtCore import QEvent
             if event.type() == QEvent.WindowStateChange:
-                is_fs = self.isFullScreen()
-                self._toolbar.setVisible(not is_fs)
-                self._status_bar.setVisible(not is_fs)
+                self._status_bar.setVisible(True)
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def closeEvent(self, event) -> None:

@@ -69,12 +69,13 @@ CLASS_NAMES = {0: "crosswalk", 1: "pedestrian"}
 class Detector:
     """Loads a YOLO model and runs detection + tracking per frame."""
 
-    def __init__(self, weights, confidence=0.35, iou=0.7, imgsz=640,
-                 device="cpu", half=False):
+    def __init__(self, weights, confidence=0.52, iou=0.7, imgsz=640,
+                 device="cpu", half=False, tracker="bytetrack.yaml"):
         self.model = YOLO(weights, task="detect")
         self.conf = confidence
         self.iou = iou
         self.imgsz = imgsz
+        self.tracker = tracker or "bytetrack.yaml"
         # Auto-fall-back: if requested GPU but CUDA not available, use CPU
         if device != "cpu" and not torch.cuda.is_available():
             print("[DriveSafe] CUDA not available – falling back to CPU")
@@ -100,7 +101,7 @@ class Detector:
             source=frame,
             imgsz=self.imgsz,
             persist=True,                # keep tracker state across calls
-            tracker="bytetrack.yaml",    # use ByteTrack algorithm
+            tracker=self.tracker,        # use configured ByteTrack profile
             conf=self.conf,
             iou=self.iou,
             classes=[0, 1],              # only our two classes

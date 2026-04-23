@@ -15,7 +15,7 @@ Crosswalk (linear ground-plane mapping):
 class DistanceEstimator:
     """Estimates distance to objects using bounding-box geometry."""
 
-    def __init__(self, focal_length=615.0, person_height=1.7,
+    def __init__(self, focal_length=1043.2, person_height=1.62,
                  crosswalk_a=-0.015, crosswalk_b=15.0):
         self.focal_length = focal_length     # camera focal length (pixels)
         self.person_height = person_height   # average adult height (metres)
@@ -28,7 +28,10 @@ class DistanceEstimator:
 
         if cls_name == "pedestrian":
             bbox_height = max(y2 - y1, 1.0)   # avoid division by zero
+            bbox_height = max(y2 - y1, 1.0)
+            print(f"bbox_height = {bbox_height:.1f} px")   # ← add temporarily
             return (self.person_height * self.focal_length) / bbox_height
+        
 
         # Crosswalk – linear approximation based on vertical position
         y_bottom = y2

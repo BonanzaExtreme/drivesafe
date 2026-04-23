@@ -24,5 +24,10 @@ desktop.ini
 # VS Code
 .vscode/
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # Ultralytics cache
 runs/

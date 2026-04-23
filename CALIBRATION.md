@@ -76,6 +76,10 @@ $$f = \frac{d \times h_{px}}{H_{real}}$$
 
 **Example calculation:**
 
+//532.5pixel at 3.0m
+//422pixel at 4.0m
+//356.7pixel at 5.0m
+
 $$f = \frac{3.0 \times 350}{1.7} = 617.6$$
 
 **5.** Repeat at **3 – 4 different distances** (3 m, 5 m, 8 m, 10 m) and

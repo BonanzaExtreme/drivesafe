@@ -458,7 +458,7 @@ class Detector:
 class DistanceEstimator:
     """Estimates distance to objects using bounding-box geometry."""
 
-    def __init__(self, focal_length=615.0, person_height=1.7):
+    def __init__(self, focal_length=617.6, person_height=1.7):
         self.focal_length = focal_length
         self.person_height = person_height
 ```

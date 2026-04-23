@@ -9,14 +9,15 @@ camera:
 
 model:
   weights: "models/yolo/best.engine"  # TensorRT FP16 engine – 10-20x faster than CPU
-  confidence: 0.6
-  iou: 0.7
+  confidence: 0.52
+  iou: 0.5
+  tracker: "configs/bytetrack_drivesafe.yaml"  # custom ByteTrack profile for smoother IDs
   imgsz: 640
   device: "0"              # Jetson Orin GPU
   half: False              # TRT engine already compiled as FP16; leave false
 
 distance:
-  focal_length: 610.0       # camera focal length in pixels (calibrate per CALIBRATION.md)
+  focal_length: 1043.2  # camera focal length in pixels (calibrate per CALIBRATION.md)
   person_height: 1.62        # average adult height in metres
   crosswalk_a: -0.015       # crosswalk linear coefficient (slope)
   crosswalk_b: 15.0         # crosswalk linear coefficient (intercept)
@@ -32,14 +33,31 @@ safety:
 alerts:
   enabled: true
   voice_rate: 160           # espeak words per minute (120-200)
+  mode: both                # both, voice, beep, or off
+  voice_model: "models/voice/en_US-hfc_male-medium (1).onnx"
   path_zone: 0.70           # centre fraction of frame treated as car's travel path
-  danger_cooldown: 2.5      # seconds between repeated danger alerts
+  dynamic_path:
+    enabled: true
+    update_every_frames: 5  # run lane/corridor estimation every N frames
+    ema_alpha: 0.30         # smoothing factor for corridor stability
+    roi_top_fraction: 0.55  # process lower road region only
+    min_width_fraction: 0.20
+    max_width_fraction: 0.95
+    max_missed_updates: 8   # keep last lane corridor for brief misses
+    lane_status_notice_duration_s: 3.0  # show lane/default banner after mode changes
+  danger_cooldown: 1.5      # seconds between repeated danger alerts
   warning_cooldown: 5.0     # seconds between repeated warning alerts
-  crosswalk_cooldown: 7.0   # seconds between repeated crosswalk alerts
+  crosswalk_cooldown: 2.5   # seconds between repeated crosswalk alerts
 
 clips:
   enabled: true
   pre_seconds: 3.0          # seconds of footage kept before the event
   post_seconds: 3.0         # seconds of footage kept after the event
   cooldown: 10.0            # minimum seconds between separate clips
-  trigger_level: "warning"  # "warning" clips both warning+danger; "danger" for danger only
+  trigger_level: "danger"   # "warning" clips both warning+danger; "danger" for danger only
+
+voice_commands:
+  enabled: true
+  model_path: "models/vosk-model-small-en-us-0.15"
+  device_index: null        # null = auto-detect audio device
+  sample_rate: 16000        # Hz – Vosk requires 16kHz mono

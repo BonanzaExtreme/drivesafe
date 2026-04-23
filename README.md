@@ -34,6 +34,45 @@ pip install ultralytics opencv-python numpy pyyaml lap
 python main.py
 ```
 
+## Build Executable (Linux)
+
+Build a standalone executable folder with PyInstaller:
+
+```bash
+./build_executable.sh
+```
+
+Run the packaged app:
+
+```bash
+./dist/DriveSafe/DriveSafe
+```
+
+Notes:
+- Keep `dist/DriveSafe` together; it contains required runtime files.
+- Place custom `config.yaml` beside the executable to override bundled config.
+- Recordings are saved to `dist/DriveSafe/recordings` when running the executable.
+
+## Install As Local Software (Linux)
+
+Install DriveSafe into your local user applications.
+
+```bash
+./install_local.sh
+```
+
+This creates:
+- App menu entry: `DriveSafe`
+- Desktop launcher file: `~/.local/share/applications/drivesafe.desktop`
+- Local install folder: `~/.local/share/drivesafe`
+- CLI command: `~/.local/bin/drivesafe` 
+
+Remove the local install:
+
+```bash
+./uninstall_local.sh
+```
+
 ---
 
 ## Keyboard
@@ -132,3 +171,4 @@ All numbers are in one file – no magic values in the code:
 | numpy       | Array operations (used by OpenCV)      |
 | pyyaml      | Config file parsing                    |
 | lap         | Linear assignment for ByteTrack        |
+| pyserial    | Direct USB GPS speed reading           |

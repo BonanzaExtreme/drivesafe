@@ -84,7 +84,7 @@ threat condition holds — it disappears the moment it is resolved.
 | In-path pedestrian – WARNING | `SLOW DOWN` | Amber |
 | In-path pedestrian – DANGER | `BRAKE NOW` | Red |
 | Multiple pedestrians in DANGER | `BRAKE NOW  (N IN PATH)` | Red |
-| Crosswalk in range (no ped alert) | `CROSSWALK AHEAD — BE CAREFUL` | Amber |
+| Crosswalk in range (no ped alert) | `CROSSWALK AHEAD BE CAREFUL` | Amber |
 
 The banner is purposely placed so it does not cover the centre of the video.
 

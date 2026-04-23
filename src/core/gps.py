@@ -1,9 +1,8 @@
 """
 gps.py – USB GPS Speed Reader
 
-Connects to gpsd (the system GPS daemon) via its socket and continuously
-reads TPV (Time-Position-Velocity) reports to extract the vehicle's current
-ground speed.
+Reads NMEA sentences directly from a USB GPS receiver over serial and
+extracts the vehicle's current ground speed.
 
 Usage
 -----
@@ -17,48 +16,94 @@ Usage
 
 Requirements
 ------------
-- gpsd must be running:      sudo systemctl start gpsd
-- Python gps package:        pip install gps  (or 'gpsd-py3' as fallback)
+- pyserial:                  pip install pyserial
+- USB GPS device connected and available as a serial port
 
 The reader runs as a daemon thread so it will not block process exit.
-If gpsd is unavailable or the device loses its fix, speed_kmh returns None
+If the GPS device is unavailable or the device loses its fix, speed_kmh returns None
 and the display gracefully shows "-- km/h".
 """
 
+import logging
+import os
 import threading
 import time
-import logging
 
 from .braking import BrakingModel
 
 logger = logging.getLogger(__name__)
 
-# ── gpsd client import (graceful degradation) ─────────────────────────────────
+# ── serial import (graceful degradation) ──────────────────────────────────────
 
 try:
-    import gps as _gps_module
-    _GPSD_AVAILABLE = True
+    import serial as _serial_module
+    from serial import SerialException
+    _SERIAL_AVAILABLE = True
 except ImportError:
-    _gps_module = None
-    _GPSD_AVAILABLE = False
+    _serial_module = None
+    SerialException = Exception
+    _SERIAL_AVAILABLE = False
     logger.warning(
-        "[GPS] 'gps' package not found. "
-        "Install it with: pip install gps\n"
+        "[GPS] 'pyserial' package not found. "
+        "Install it with: pip install pyserial\n"
         "Speed will show as unavailable."
     )
 
 
-# m/s  →  km/h
-_MS_TO_KMH = 3.6
+# knots → km/h
+_KNOTS_TO_KMH = 1.852
 
-# Minimum speed (m/s) to report – below this threshold we treat it as 0
-# (eliminates GPS drift noise when stationary)
-_MIN_SPEED_MS = 0.3
+_DEFAULT_PORTS = (
+    "/dev/ttyUSB0",
+    "/dev/ttyACM0",
+    "/dev/ttyS0",
+)
+
+
+def _safe_float(value: str | None) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _parse_lat_lon(value: str | None, hemisphere: str | None) -> float | None:
+    if not value or not hemisphere:
+        return None
+
+    try:
+        raw = float(value)
+    except ValueError:
+        return None
+
+    degrees = int(raw // 100)
+    minutes = raw - (degrees * 100)
+    decimal = degrees + (minutes / 60.0)
+    if hemisphere in ("S", "W"):
+        decimal = -decimal
+    return decimal
+
+
+def _resolve_serial_port(preferred: str | None) -> str:
+    env_port = os.getenv("DRIVESAFE_GPS_PORT")
+    if env_port:
+        return env_port
+
+    if preferred:
+        return preferred
+
+    for candidate in _DEFAULT_PORTS:
+        if os.path.exists(candidate):
+            return candidate
+
+    return _DEFAULT_PORTS[0]
 
 
 class GPSReader:
     """
-    Background thread that polls gpsd for vehicle speed and position.
+    Background thread that polls a serial GPS receiver for speed and position.
 
     Attributes (read from any thread)
     ----------
@@ -71,12 +116,14 @@ class GPSReader:
     """
 
     def __init__(self,
-                 host: str = "127.0.0.1",
-                 port: int = 2947,
-                 reconnect_delay: float = 3.0) -> None:
-        self._host            = host
-        self._port            = port
+                 serial_port: str | None = None,
+                 baud_rate: int = 9600,
+                 reconnect_delay: float = 3.0,
+                 timeout: float = 1.0) -> None:
+        self._serial_port     = _resolve_serial_port(serial_port)
+        self._baud_rate       = int(os.getenv("DRIVESAFE_GPS_BAUDRATE", baud_rate))
         self._reconnect_delay = reconnect_delay
+        self._timeout         = timeout
 
         # Shared state – written only inside the reader thread
         self._lock      = threading.Lock()
@@ -154,13 +201,13 @@ class GPSReader:
             self._speed_kmh = None
             self._has_fix   = False
 
-    def _update(self, speed_ms: float | None, lat: float | None, lon: float | None) -> None:
+    def _update(self,
+                speed_kmh: float | None = None,
+                lat: float | None = None,
+                lon: float | None = None) -> None:
         with self._lock:
-            if speed_ms is not None and speed_ms >= _MIN_SPEED_MS:
-                self._speed_kmh = round(speed_ms * _MS_TO_KMH, 1)
-            elif speed_ms is not None:
-                self._speed_kmh = 0.0
-            # else: keep previous value
+            if speed_kmh is not None:
+                self._speed_kmh = max(0.0, round(speed_kmh, 1))
 
             if lat is not None:
                 self._lat = lat
@@ -170,46 +217,79 @@ class GPSReader:
             self._has_fix = lat is not None
 
     def _run(self) -> None:
-        """Main loop: connect to gpsd and stream TPV reports."""
-        if not _GPSD_AVAILABLE:
-            logger.warning("[GPS] gpsd client unavailable – reader inactive.")
+        """Main loop: connect to the serial GPS device and stream NMEA sentences."""
+        if not _SERIAL_AVAILABLE:
+            logger.warning("[GPS] serial client unavailable – reader inactive.")
             return
 
         while self._running:
-            session = None
+            serial_port = None
             try:
-                logger.info(f"[GPS] Connecting to gpsd at {self._host}:{self._port}")
-                session = _gps_module.gps(
-                    host=self._host,
-                    port=self._port,
-                    mode=_gps_module.WATCH_ENABLE | _gps_module.WATCH_NEWSTYLE,
+                logger.info(
+                    f"[GPS] Connecting to serial GPS at {self._serial_port} "
+                    f"({self._baud_rate} baud)"
+                )
+                serial_port = _serial_module.Serial(
+                    port=self._serial_port,
+                    baudrate=self._baud_rate,
+                    timeout=self._timeout,
                 )
 
-                for report in session:
-                    if not self._running:
-                        break
-
-                    if report["class"] != "TPV":
+                while self._running:
+                    raw = serial_port.readline()
+                    if not raw:
                         continue
 
-                    # Extract fields – getattr with sentinel avoids KeyError
-                    speed_ms = getattr(report, "speed", None)   # m/s, float or None
-                    lat      = getattr(report, "lat",   None)
-                    lon      = getattr(report, "lon",   None)
+                    line = raw.decode("ascii", errors="replace").strip()
+                    if not line.startswith("$"):
+                        continue
 
-                    self._update(speed_ms, lat, lon)
+                    fields = line.split(",")
+                    sentence = fields[0][1:]
 
-            except StopIteration:
-                # gpsd closed the stream (e.g. device disconnected)
-                logger.warning("[GPS] gpsd stream ended.")
+                    if sentence == "GPVTG" or sentence == "GNVTG":
+                        # VTG speed is usually in km/h at field 7.
+                        speed_kmh = _safe_float(fields[7] if len(fields) > 7 else None)
+                        if speed_kmh is not None:
+                            self._update(speed_kmh=speed_kmh)
+                        continue
+
+                    if sentence in ("GPRMC", "GNRMC"):
+                        # RMC speed is in knots at field 7, position is fields 3-6.
+                        speed_knots = _safe_float(fields[7] if len(fields) > 7 else None)
+                        lat = _parse_lat_lon(fields[3] if len(fields) > 3 else None,
+                                             fields[4] if len(fields) > 4 else None)
+                        lon = _parse_lat_lon(fields[5] if len(fields) > 5 else None,
+                                             fields[6] if len(fields) > 6 else None)
+                        if speed_knots is not None:
+                            self._update(speed_kmh=speed_knots * _KNOTS_TO_KMH,
+                                         lat=lat, lon=lon)
+                        elif lat is not None or lon is not None:
+                            self._update(lat=lat, lon=lon)
+                        continue
+
+                    if sentence in ("GPGGA", "GNGGA"):
+                        # GGA carries position but not speed.
+                        lat = _parse_lat_lon(fields[2] if len(fields) > 2 else None,
+                                             fields[3] if len(fields) > 3 else None)
+                        lon = _parse_lat_lon(fields[4] if len(fields) > 4 else None,
+                                             fields[5] if len(fields) > 5 else None)
+                        if lat is not None or lon is not None:
+                            self._update(lat=lat, lon=lon)
+
+            except SerialException as exc:
+                logger.warning(
+                    f"[GPS] Could not open {self._serial_port}: {exc} "
+                    f"– retrying in {self._reconnect_delay}s"
+                )
                 self._set_no_fix()
             except Exception as exc:
-                logger.warning(f"[GPS] Error: {exc}  – retrying in {self._reconnect_delay}s")
+                logger.warning(f"[GPS] Error: {exc} – retrying in {self._reconnect_delay}s")
                 self._set_no_fix()
             finally:
                 try:
-                    if session is not None:
-                        session.close()
+                    if serial_port is not None:
+                        serial_port.close()
                 except Exception:
                     pass
 

@@ -73,11 +73,12 @@ class ClipRecorder:
     def feed(self, frame) -> None:
         """Add a frame to the rolling buffer (or active clip).  Call once
         per processed frame, *after* drawing the HUD."""
+        frame_copy = frame.copy()
         with self._lock:
-            self._buffer.append(frame.copy())
+            self._buffer.append(frame_copy)
 
             if self._active:
-                self._post_frames.append(frame.copy())
+                self._post_frames.append(frame_copy)
                 total = len(self._pre_snapshot) + len(self._post_frames)
                 if (len(self._post_frames) >= self._post_target
                         or total >= self._max_clip_frames):

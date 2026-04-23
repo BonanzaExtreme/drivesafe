@@ -9,16 +9,14 @@ Single file that handles everything displayed on screen:  - Startup screen with 
 """
 
 import datetime
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
+from ..core.safety import SafetyLevel, is_in_corridor
 
-
-from ..core.safety import SafetyLevel, is_in_path
-
-# Fonts (OpenCV built-ins only – no BOLD or ITALIC, they don't exist)
+# OpenCV drawing APIs expect a cv2 font face constant (not Tkinter fonts).
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-FONT_SM = cv2.FONT_HERSHEY_DUPLEX
 
 # Colours (BGR)
 WHITE = (255, 255, 255)
@@ -64,69 +62,60 @@ def draw_corners(frame, x1, y1, x2, y2, color, t=2, length=18):
     cv2.line(frame, (x2, y2), (x2, y2 - L), color, t, cv2.LINE_AA)
 
 
-# ── Startup Screen ────────────────────────────────────────────────
-
-def _center_text(frame, text, y, scale, thickness, color):
-    """Draw text horizontally centered on the frame."""
-    (tw, _), _ = cv2.getTextSize(text, FONT, scale, thickness)
-    cx = frame.shape[1] // 2
-    cv2.putText(frame, text, (cx - tw // 2, y), FONT, scale, color, thickness, cv2.LINE_AA)
-
-
-def draw_startup_screen(frame):
-    """Show project info, version, developers on startup."""
-    h, w = frame.shape[:2]
-    frame[:] = (25, 25, 25)  # dark background
-    # Scale factor so layout adapts to any resolution
-    sf = max(min(w / 1280.0, h / 720.0), 0.45)
-
-    # Title
-    _center_text(frame, "DriveSafe", h // 3,
-                 scale=2.0 * sf, thickness=max(2, int(4 * sf)), color=WHITE)
-
-    # Subtitle – always centered so it never goes off-screen
-    _center_text(frame, "Pedestrian Detection & Distance Estimation System",
-                 h // 3 + int(65 * sf), scale=0.65 * sf, thickness=2, color=GRAY)
-
-    # Version
-    _center_text(frame, "Version 2.0",
-                 h // 3 + int(115 * sf), scale=0.6 * sf, thickness=2, color=(150, 150, 150))
-
-    # Divider
-    cx = w // 2
-    cv2.line(frame, (cx - int(220 * sf), h // 2 - 10),
-             (cx + int(220 * sf), h // 2 - 10), (100, 100, 100), 2)
-
-    # About
-    about = [
-        "YOLOv9 + ByteTrack Object Detection",
-        "Monocular Distance Estimation",
-        "Real-time Safety Assessment",
-    ]
-    row_gap = int(36 * sf)
-    for i, line in enumerate(about):
-        _center_text(frame, line,
-                     h // 2 + int(35 * sf) + i * row_gap,
-                     scale=0.62 * sf, thickness=2, color=GRAY)
-
-    # Developers
-    _center_text(frame, "Developed by: TIPQC DriveSafe",
-                 h - int(80 * sf), scale=0.6 * sf, thickness=2, color=(130, 130, 130))
-
-    # Instructions
-    _center_text(frame, "Press ENTER to start",
-                 h - int(40 * sf), scale=0.72 * sf, thickness=2, color=WHITE)
-
-
 # ── Path Zone & Alert Banner (private helpers) ──────────────────
 
-def _draw_path_zone(frame, zone_fraction: float, top_offset: int) -> None:
-    """Dashed vertical guide lines showing the car's travel path zone."""
+def _draw_path_zone(
+    frame,
+    zone_fraction: float,
+    top_offset: int,
+    corridor: Optional[Tuple[float, float]] = None,
+    lane_lines: Optional[Tuple[Tuple[float, float, float, float], Tuple[float, float, float, float]]] = None,
+) -> None:
+    """Draw a tapered lane sketch, or fixed fallback guide lines."""
     h, w = frame.shape[:2]
-    margin = int(w * (1.0 - zone_fraction) / 2)
-    color  = (160, 160, 100)   # muted yellow-white – visible but not distracting
+    if corridor is not None and corridor[1] > corridor[0]:
+        left_x = int(max(0.0, min(1.0, corridor[0])) * w)
+        right_x = int(max(0.0, min(1.0, corridor[1])) * w)
+        xs = (left_x, right_x)
+        color = (80, 220, 220)  # cyan-ish for dynamic mode
+
+        if lane_lines is not None:
+            polygon_pts = []
+            for x1n, y1n, x2n, y2n in lane_lines:
+                x1 = int(max(0.0, min(1.0, x1n)) * w)
+                y1 = int(max(0.0, min(1.0, y1n)) * h)
+                x2 = int(max(0.0, min(1.0, x2n)) * w)
+                y2 = int(max(0.0, min(1.0, y2n)) * h)
+                polygon_pts.append((x1, y1))
+                polygon_pts.append((x2, y2))
+
+            if len(polygon_pts) >= 4:
+                # Build a tapered quadrilateral from the fitted side lines.
+                left_line = lane_lines[0]
+                right_line = lane_lines[1]
+                lbx = int(max(0.0, min(1.0, left_line[0])) * w)
+                lby = int(max(0.0, min(1.0, left_line[1])) * h)
+                ltx = int(max(0.0, min(1.0, left_line[2])) * w)
+                lty = int(max(0.0, min(1.0, left_line[3])) * h)
+                rbx = int(max(0.0, min(1.0, right_line[0])) * w)
+                rby = int(max(0.0, min(1.0, right_line[1])) * h)
+                rtx = int(max(0.0, min(1.0, right_line[2])) * w)
+                rty = int(max(0.0, min(1.0, right_line[3])) * h)
+                quad = np.array([
+                    [lbx, lby],
+                    [ltx, lty],
+                    [rtx, rty],
+                    [rbx, rby],
+                ], dtype=np.int32)
+                cv2.polylines(frame, [quad], True, (0, 120, 120), 6, cv2.LINE_AA)
+                cv2.polylines(frame, [quad], True, (0, 255, 255), 2, cv2.LINE_AA)
+    else:
+        margin = int(w * (1.0 - zone_fraction) / 2)
+        xs = (margin, w - margin)
+        color = (160, 160, 100)  # muted yellow-white fallback
+
     dash, gap = 14, 8
-    for x in (margin, w - margin):
+    for x in xs:
         y = top_offset
         while y < h:
             cv2.line(frame, (x, y), (x, min(y + dash, h)), color, 1, cv2.LINE_AA)
@@ -161,13 +150,19 @@ def _draw_alert_banner(frame, text: str, color, bar_top: int, sf: float) -> None
 
 def draw_hud(frame, detections, assessor, estimator,
              path_zone: float = 0.40,
+             corridor: Optional[Tuple[float, float]] = None,
+             lane_lines: Optional[Tuple[Tuple[float, float, float, float], Tuple[float, float, float, float]]] = None,
+             info_text: str | None = None,
              alert_text: str | None = None,
              alert_color=None,
              speed_kmh: float | None = None):
     """
     Draw the complete heads-up display on the video frame.
 
-    path_zone   – fraction of frame width treated as the car's travel path.
+    path_zone   – fallback fraction of frame width for fixed travel path lines.
+    corridor    – dynamic lane corridor as (left_norm, right_norm) in [0, 1].
+    lane_lines  – optional left/right lane boundary lines for visual sketch.
+    info_text   – non-critical informational banner (shown when no alert banner).
     alert_text  – when set, shows a bold warning banner below the top bar.
     alert_color – BGR colour for the banner (defaults to WARNING amber).
     speed_kmh   – current GPS ground speed in km/h, or None when unavailable.
@@ -180,7 +175,7 @@ def draw_hud(frame, detections, assessor, estimator,
     ts      = 0.65 * sf
 
     # ── Path zone guide lines ─────────────────────────────────────
-    _draw_path_zone(frame, path_zone, bar_top)
+    _draw_path_zone(frame, path_zone, bar_top, corridor=corridor, lane_lines=lane_lines)
 
     levels     = []
     n_in_path  = 0
@@ -193,8 +188,17 @@ def draw_hud(frame, detections, assessor, estimator,
         color = assessor.color(level)
         x1, y1, x2, y2 = map(int, det.bbox)
 
-        in_path = (det.cls_name == "pedestrian" and
-                   is_in_path(det.bbox, w, path_zone))
+        in_path = (
+            det.cls_name == "pedestrian"
+            and is_in_corridor(
+                det.bbox,
+                w,
+                corridor,
+                path_zone,
+                lane_lines_norm=lane_lines,
+                frame_height=h,
+            )
+        )
         if in_path:
             n_in_path += 1
 
@@ -204,13 +208,15 @@ def draw_hud(frame, detections, assessor, estimator,
                      t=t, length=max(int(22 * sf), 10))
 
         # Label: "PED #4  6.2m  !" (! = in-path pedestrian)
-        tag = det.cls_name[:3].upper()
-        if det.track_id >= 0:
-            tag += f" #{det.track_id}"
-        tag += f"  {dist:.1f}m"
-       
-        put_text(frame, tag, (x1, max(y1 - int(10 * sf), bar_top + 5)),
-                 scale=ts, color=WHITE, thickness=2, bg=color)
+        # Don't show label for crosswalks
+        if det.cls_name != "crosswalk":
+            tag = det.cls_name[:3].upper()
+            if det.track_id >= 0:
+                tag += f" #{det.track_id}"
+            tag += f"  {dist:.1f}m"
+           
+            put_text(frame, tag, (x1, max(y1 - int(10 * sf), bar_top + 5)),
+                     scale=ts, color=WHITE, thickness=2, bg=color)
         if in_path:
             badge      = "IN PATH"
             b_scale    = 0.55 * sf
@@ -234,6 +240,8 @@ def draw_hud(frame, detections, assessor, estimator,
     if alert_text:
         _draw_alert_banner(frame, alert_text,
                            alert_color or (0, 200, 255), bar_top, sf)
+    elif info_text:
+        _draw_alert_banner(frame, info_text, (180, 180, 180), bar_top, sf)
 
     # ── Top status bar (clock + detection counts) ──────────────────
     draw_panel(frame, 0, 0, w, bar_top)
@@ -244,19 +252,19 @@ def draw_hud(frame, detections, assessor, estimator,
     put_text(frame, now_str, (pad, ty), scale=ts, color=GRAY, thickness=2)
 
     # ── Speed readout (GPS) – centred in the top bar ──────────────
-    if speed_kmh is not None:
-        spd_text = f"{speed_kmh:.0f} km/h"
-        spd_col  = (100, 220, 100)   # muted green when normal
-        if speed_kmh > 50:
-            spd_col = (0, 200, 255)  # amber above 50 km/h
-        if speed_kmh > 100:
-            spd_col = (0, 80, 230)   # red above 100 km/h
-    else:
-        spd_text = "-- km/h"
-        spd_col  = (100, 100, 100)
-    (spd_w, _), _ = cv2.getTextSize(spd_text, FONT, ts, 2)
-    spd_x = (w - spd_w) // 2
-    put_text(frame, spd_text, (spd_x, ty), scale=ts, color=spd_col, thickness=2)
+    # if speed_kmh is not None:
+    #      spd_text = f"{speed_kmh:.0f} km/h"
+    #      spd_col  = (100, 220, 100)   # muted green when normal
+    #      if speed_kmh > 50:
+    #          spd_col = (0, 200, 255)  # amber above 50 km/h
+    #      if speed_kmh > 100:
+    #          spd_col = (0, 80, 230)   # red above 100 km/h
+    # else:
+    #     spd_text = "-- km/h"
+    #     spd_col  = (100, 100, 100)
+    # (spd_w, _), _ = cv2.getTextSize(spd_text, FONT, ts, 2)
+    # spd_x = (w - spd_w) // 2
+    # put_text(frame, spd_text, (spd_x, ty), scale=ts, color=spd_col, thickness=2)
 
     n_ped = sum(1 for d in detections if d.cls_name == "pedestrian")
     n_cw  = sum(1 for d in detections if d.cls_name == "crosswalk")

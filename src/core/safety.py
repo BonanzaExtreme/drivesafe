@@ -73,3 +73,77 @@ def is_in_path(bbox, frame_width: int, zone_fraction: float = 0.40) -> bool:
     cx = (bbox[0] + bbox[2]) / 2
     margin = frame_width * (1.0 - zone_fraction) / 2
     return margin <= cx <= (frame_width - margin)
+
+
+def is_in_corridor(
+    bbox,
+    frame_width: int,
+    corridor_norm: tuple[float, float] | None,
+    fallback_zone_fraction: float = 0.40,
+    lane_lines_norm: tuple[tuple[float, float, float, float], tuple[float, float, float, float]] | None = None,
+    frame_height: int | None = None,
+) -> bool:
+    """
+    Returns True if the bbox center lies inside the dynamic lane corridor.
+
+    corridor_norm is (left_norm, right_norm) in [0, 1]. If corridor_norm is
+    unavailable/invalid, falls back to the fixed central zone_fraction check.
+
+    When lane_lines_norm is available, the check follows lane shape by
+    evaluating lane boundaries at the pedestrian's vertical position.
+    """
+    if lane_lines_norm is not None and frame_height and frame_height > 0:
+        lane_bounds = _lane_bounds_at_bbox_y(bbox, lane_lines_norm, frame_width, frame_height)
+        if lane_bounds is not None:
+            left_x, right_x = lane_bounds
+            cx = (bbox[0] + bbox[2]) / 2
+            return left_x <= cx <= right_x
+
+    if corridor_norm is None:
+        return is_in_path(bbox, frame_width, fallback_zone_fraction)
+
+    left_norm, right_norm = corridor_norm
+    left_norm = max(0.0, min(1.0, float(left_norm)))
+    right_norm = max(0.0, min(1.0, float(right_norm)))
+    if right_norm <= left_norm:
+        return is_in_path(bbox, frame_width, fallback_zone_fraction)
+
+    cx = (bbox[0] + bbox[2]) / 2
+    left_x = left_norm * frame_width
+    right_x = right_norm * frame_width
+    return left_x <= cx <= right_x
+
+
+def _lane_bounds_at_bbox_y(
+    bbox,
+    lane_lines_norm: tuple[tuple[float, float, float, float], tuple[float, float, float, float]],
+    frame_width: int,
+    frame_height: int,
+) -> tuple[float, float] | None:
+    """Return (left_x, right_x) lane bounds at bbox bottom-center y, or None."""
+    left_line, right_line = lane_lines_norm
+    y_norm = max(0.0, min(1.0, float(bbox[3]) / max(frame_height - 1, 1)))
+
+    left_x_norm = _line_x_at_y_norm(left_line, y_norm)
+    right_x_norm = _line_x_at_y_norm(right_line, y_norm)
+    if left_x_norm is None or right_x_norm is None:
+        return None
+    if right_x_norm <= left_x_norm:
+        return None
+
+    return left_x_norm * frame_width, right_x_norm * frame_width
+
+
+def _line_x_at_y_norm(line: tuple[float, float, float, float], y_norm: float) -> float | None:
+    """Interpolate x on line (x1,y1,x2,y2) for y_norm, with segment clamping."""
+    x1, y1, x2, y2 = line
+    y_min, y_max = (y1, y2) if y1 <= y2 else (y2, y1)
+    y = min(max(y_norm, y_min), y_max)
+
+    dy = y2 - y1
+    if abs(dy) < 1e-6:
+        return max(0.0, min(1.0, float(x1)))
+
+    t = (y - y1) / dy
+    x = x1 + t * (x2 - x1)
+    return max(0.0, min(1.0, float(x)))
